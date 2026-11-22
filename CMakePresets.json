@@ -13,6 +13,7 @@
       "binaryDir": "${sourceDir}/build/pc-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "PS2X_GS_BACKEND": "PARALLEL_GS",
         "PS2X_ENABLE_AGRESSIVE_LOGS": "OFF",
         "PS2X_ENABLE_RUNTIME_LOGS": "ON",
         "PS2X_SHOW_WINDOWS_CONSOLE": "ON"
@@ -25,6 +26,7 @@
       "binaryDir": "${sourceDir}/build/pc-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "PS2X_GS_BACKEND": "PARALLEL_GS",
         "PS2X_ENABLE_AGRESSIVE_LOGS": "OFF",
         "PS2X_ENABLE_RUNTIME_LOGS": "ON",
         "PS2X_SHOW_WINDOWS_CONSOLE": "ON"
@@ -48,4 +50,3 @@
     }
   ]
 }
-

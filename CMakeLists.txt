@@ -99,6 +99,23 @@ target_include_directories(ps2EntryRunner PRIVATE
 target_compile_definitions(ps2EntryRunner PRIVATE
     DISNEY_PRINCESS_DEFAULT_CD_IMAGE="${_default_cd_image}"
 )
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Vita")
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/disney_princess_io.cpp"
+        # Source properties are per directory, and the target is the submodule's.
+        TARGET_DIRECTORY ps2EntryRunner
+        PROPERTIES
+        SKIP_UNITY_BUILD_INCLUSION TRUE
+        COMPILE_DEFINITIONS
+        "DISNEY_PRINCESS_CD_IMAGE_MARKER=\"${CMAKE_CURRENT_SOURCE_DIR}/.work/disc-image.path\""
+    )
+endif()
+
+# Without this the runner loads whichever MinGW runtime is first on PATH and
+# exits with 0xC0000139 when that is a different toolchain's.
+if(WIN32 AND MINGW)
+    target_link_options(ps2EntryRunner PRIVATE -static)
+endif()
 set_source_files_properties(
     "${_generated_registration}"
     PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE

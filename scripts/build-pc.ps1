@@ -4,7 +4,7 @@ param(
     [string]$Configuration = "Release",
 
     [ValidateRange(1, 128)]
-    [int]$Jobs = 8
+    [int]$Jobs = [Environment]::ProcessorCount
 )
 
 $ErrorActionPreference = "Stop"

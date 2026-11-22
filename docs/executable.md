@@ -57,6 +57,29 @@ Strings in this exact build identify:
 These strings establish linked middleware, but do not prove that every linked
 error path or feature is exercised by this game.
 
+## Observed render submission
+
+A trace of 6,000 DMA, VIF and GIF events in the title scene established:
+
+- Geometry reaches the GS on PATH1, through VU1 `MSCAL`/`MSCNT` and XGKICK.
+- Textures and register state travel inline in the VIF1 chain on PATH2. The
+  traced window contained no PATH3 submissions.
+- A single GIF tag can span several VIF `DIRECT` commands, for register
+  (PACKED) payloads as well as IMAGE payloads.
+- `0x0025FC40` is the per-frame service that waits for vblank.
+
+## Frame loop and movie player
+
+- `0x0025D408` is the frame flip: it waits for DMAC VIF1 completion, calls
+  `0x0025FC40` (SyncV, then DISPFB1/2), kicks the frame's single VIF1 chain at
+  `0x00264898`, then writes DISPLAY1/2 and starts the next display list.
+- `0x0028B080` creates the PSS player and `0x0028B328` updates it. It
+  registers libmpeg callbacks before calling `sceMpegInit`, supplies data from
+  the thread that calls GetPicture, and finishes only after its VAGSTRM
+  stream (`0x00275FC0` onward) has stopped playing.
+- 77 sites compare vectors with `vsub.xyzw vf0, a, b` followed by
+  `cfc2 vi17`, so VF0 and MAC semantics matter to game logic.
+
 ## Static-recompilation result
 
 The selected PS2Recomp analyzer reports:

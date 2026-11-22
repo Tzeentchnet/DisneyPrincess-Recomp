@@ -13,8 +13,12 @@ disc image. Those files remain under the ignored `.work` directory.
 
 The reproducible extraction, static analysis, and code-generation pipeline is
 working. The retail ELF currently produces 9,690 recompiled functions and 129
-stubs with no decoder failures or unhandled instructions. A playable PC boot
-has not yet been established; see [PC port status](docs/pc-port-status.md).
+stubs with no decoder failures or unhandled instructions. The PC build cold
+boots through the logo movie, title, menus, intro movie, name entry and
+character creator into the first playable room, where it holds 30 fps on a
+Ryzen 7 9800X3D and RTX 5070. Only that opening has been played, sound output
+is not implemented, and saving is untested; see
+[PC port status](docs/pc-port-status.md) and [TODO](TODO.md).
 The Vita target is an explicit follow-on target, not a verified port.
 
 ## Prerequisites
@@ -73,6 +77,28 @@ PS2Recomp derives its emulated CD root from the boot ELF's parent directory,
 so `DATA` and `MODULES` must remain beside `SLUS_216.60`.
 The original image is also supplied through `DPRE_CD_IMAGE` because the game
 performs raw reads of ISO metadata sectors before ordinary path lookups.
+`run-pc.ps1` sets that variable. A direct launch falls back to the path
+recorded in `.work\disc-image.path` and exits with an error if there is no
+image.
+
+Saves live in `.work\saves\mc0`. On first launch an existing
+`.work\disc\mc0` is copied there; the original is left alone. Set
+`DPRE_MC_ROOT` to use another directory.
+
+| Input | Keyboard | XInput controller |
+|---|---|---|
+| Move (left stick) | W A S D | Left stick |
+| D-pad | Arrow keys | D-pad |
+| Cross | X or Space | A |
+| Circle | C or Escape | B |
+| Square | Z | X |
+| Triangle | V | Y |
+| L1 / R1 | Q / E | Bumpers |
+| L2 / R2 | Left Shift / Right Shift | Triggers |
+| Start / Select | Enter / Tab | Start / Back |
+
+The keyboard is player one. Controller 1 is player one and controller 2 is
+player two.
 
 ## Vita target
 
@@ -94,5 +120,6 @@ on hardware.
 - [Executable analysis](docs/executable.md)
 - [Asset and archive formats](docs/formats.md)
 - [PS2Recomp upstream patch set](docs/ps2recomp-upstream.md)
+- [Potential upstream pull requests](docs/upstream.md)
 - [PC port status](docs/pc-port-status.md)
 - [Vita port plan](docs/vita-port.md)

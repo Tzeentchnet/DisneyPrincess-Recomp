@@ -4,8 +4,10 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -14,6 +16,10 @@
 #include "ps2_runtime_macros.h"
 #include "ps2_stubs.h"
 #include "ps2_syscalls.h"
+#include "runtime/gs/gs_frontend.h"
+#include "runtime/ps2_memory.h"
+#include "runtime/ps2_vu1.h"
+#include "ps2x/iop/iop_types.h"
 
 namespace
 {
@@ -25,6 +31,10 @@ namespace
     constexpr uint32_t kBootStateAddress = 0x001083E8u;
     constexpr uint32_t kPostLegalStateAddress = 0x001085C8u;
     constexpr uint32_t kFrameServiceAddress = 0x0025FC40u;
+    constexpr uint32_t kInsertAlarmAddress = 0x00318D98u;
+    constexpr uint32_t kUnlinkAlarmAddress = 0x00318E20u;
+    constexpr uint32_t kTimerHandlerAddress = 0x00318E58u;
+    constexpr uint32_t kTimerAlarmHeadAddress = 0x003AE330u;
     constexpr uint32_t kSifSendCmdAddress = 0x00311978u;
     constexpr uint32_t kSceSifSendCmdAddress = 0x00311AB0u;
     constexpr uint32_t kSceSifCallRpcAddress = 0x003126B0u;
@@ -54,11 +64,16 @@ namespace
         std::numeric_limits<uint32_t>::max()};
     std::atomic_uint32_t g_schedulerTraceCount{0u};
     std::atomic_uint32_t g_schedulerTraceTarget{120u};
+    std::atomic_uint32_t g_timerHandlerEntryCount{0u};
+    std::atomic_uint32_t g_timerTraceCount{0u};
     std::atomic_uint32_t g_gameHeapLimit{kDefaultGameHeapLimit};
     PS2Runtime::RecompiledFunction g_allocatorFunction = nullptr;
     PS2Runtime::RecompiledFunction g_bootStateFunction = nullptr;
     PS2Runtime::RecompiledFunction g_postLegalStateFunction = nullptr;
     PS2Runtime::RecompiledFunction g_frameServiceFunction = nullptr;
+    PS2Runtime::RecompiledFunction g_insertAlarmFunction = nullptr;
+    PS2Runtime::RecompiledFunction g_timerHandlerFunction = nullptr;
+    PS2Runtime::RecompiledFunction g_unlinkAlarmFunction = nullptr;
     PS2Runtime::RecompiledFunction g_sceSifCallRpcFunction = nullptr;
 
     void disneySetupHeap(uint8_t *, R5900Context *ctx, PS2Runtime *runtime)
@@ -135,6 +150,59 @@ namespace
     {
         const char *value = std::getenv("DPRE_TRACE_SCHEDULER");
         return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    bool timerTraceEnabled()
+    {
+        const char *value = std::getenv("DPRE_TRACE_TIMER");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    bool timerRecordReadable(uint32_t record)
+    {
+        constexpr uint32_t kTimerRecordSize = 64u;
+        return record <= PS2_RAM_SIZE - kTimerRecordSize;
+    }
+
+    void traceTimerRecord(uint8_t *rdram,
+                          R5900Context *ctx,
+                          PS2Runtime *runtime,
+                          const char *operation,
+                          const char *phase,
+                          uint32_t record)
+    {
+        const uint32_t traceIndex =
+            g_timerTraceCount.fetch_add(1u, std::memory_order_relaxed);
+        if (traceIndex >= 256u)
+        {
+            return;
+        }
+
+        std::cerr << "[DisneyPrincess:timer]"
+                  << " index=" << traceIndex
+                  << " op=" << operation
+                  << " phase=" << phase
+                  << " pc=0x" << std::hex << ctx->pc
+                  << " ra=0x" << GPR_U32(ctx, 31)
+                  << " record=0x" << record
+                  << " head=0x" << READ32(kTimerAlarmHeadAddress);
+        if (timerRecordReadable(record))
+        {
+            std::cerr << " next=0x" << READ32(record)
+                      << " previous=0x" << READ32(record + 4u)
+                      << " key=0x" << READ32(record + 8u)
+                      << " mode=0x" << READ32(record + 12u)
+                      << " baseTime=0x" << READ64(record + 16u)
+                      << " baseCount=0x" << READ64(record + 24u)
+                      << " schedule=0x" << READ64(record + 32u)
+                      << " callback=0x" << READ32(record + 40u)
+                      << " callbackArg=0x" << READ32(record + 48u);
+        }
+        else
+        {
+            std::cerr << " invalid-record";
+        }
+        std::cerr << std::dec << std::endl;
     }
 
     uint32_t schedulerTraceTarget()
@@ -1116,6 +1184,38 @@ namespace
         g_allocatorFunction(rdram, ctx, runtime);
     }
 
+    void traceInsertAlarm(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t record = GPR_U32(ctx, 4);
+        const uint32_t returnAddress = GPR_U32(ctx, 31);
+        traceTimerRecord(rdram, ctx, runtime, "insert", "before", record);
+        g_insertAlarmFunction(rdram, ctx, runtime);
+        if (ctx->pc == returnAddress)
+        {
+            traceTimerRecord(rdram, ctx, runtime, "insert", "after", record);
+        }
+    }
+
+    void traceUnlinkAlarm(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t record = GPR_U32(ctx, 4);
+        traceTimerRecord(rdram, ctx, runtime, "unlink", "before", record);
+        g_unlinkAlarmFunction(rdram, ctx, runtime);
+        traceTimerRecord(rdram, ctx, runtime, "unlink", "after", record);
+    }
+
+    void traceTimerHandler(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t head = READ32(kTimerAlarmHeadAddress);
+        const uint32_t entryIndex =
+            g_timerHandlerEntryCount.fetch_add(1u, std::memory_order_relaxed);
+        if (entryIndex < 8u || head != 0u)
+        {
+            traceTimerRecord(rdram, ctx, runtime, "handler", "entry", head);
+        }
+        g_timerHandlerFunction(rdram, ctx, runtime);
+    }
+
     void disneySceCdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t traceIndex =
@@ -1179,8 +1279,60 @@ namespace
         SET_GPR_S32(ctx, 2, status);
     }
 
+    void requireDiscImage()
+    {
+        const std::filesystem::path image = PS2Runtime::getIoPaths().cdImage;
+        std::error_code error;
+        if (image.empty() || !std::filesystem::is_regular_file(image, error))
+        {
+            throw std::runtime_error(
+                "this game reads raw disc sectors and needs its ISO: use scripts\\run-pc.ps1 or set DPRE_CD_IMAGE");
+        }
+    }
+
+    // Saves live beside the extracted disc, in <parent>/saves/mc0, never in it.
+    void configureSaveRoot()
+    {
+#if !defined(PLATFORM_VITA)
+        namespace fs = std::filesystem;
+        PS2Runtime::IoPaths paths = PS2Runtime::getIoPaths();
+        const fs::path legacy = paths.elfDirectory / "mc0";
+        const char *configured = std::getenv("DPRE_MC_ROOT");
+        const fs::path root = configured != nullptr && configured[0] != '\0'
+                                  ? fs::path(configured)
+                                  : paths.elfDirectory.parent_path() / "saves" / "mc0";
+        if (!fs::exists(root))
+        {
+            fs::create_directories(root.parent_path());
+            // Earlier builds saved inside the disc tree. Copy, never move.
+            if (fs::is_directory(legacy))
+            {
+                fs::copy(legacy, root, fs::copy_options::recursive);
+                std::cerr << "[DisneyPrincess] copied existing saves to " << root.string() << std::endl;
+            }
+            else
+            {
+                fs::create_directories(root);
+            }
+        }
+        paths.mcRoot = root;
+        PS2Runtime::setIoPaths(paths);
+#endif
+    }
+
+    bool synchronousVu1Requested()
+    {
+        const char *value = std::getenv("DPRE_SYNC_VU1");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
     void applyDisneyPrincessOverrides(PS2Runtime &runtime)
     {
+        requireDiscImage();
+        configureSaveRoot();
+        // sub_0025D408 kicks one copied-on-kick VIF1 chain per frame and waits
+        // for it only before the next vsync and flip, so VU1 can run alongside.
+        runtime.memory().setAsyncVif1(!synchronousVu1Requested());
         g_cdReadPending.store(false, std::memory_order_relaxed);
         g_cdReadTraceCount.store(0u, std::memory_order_relaxed);
         g_cdSyncTraceCount.store(0u, std::memory_order_relaxed);
@@ -1270,6 +1422,27 @@ namespace
                        runtime.replaceFunction(kFrameServiceAddress,
                                                traceScheduler) &&
                        replaced;
+        }
+
+        if (timerTraceEnabled())
+        {
+            g_timerHandlerEntryCount.store(0u, std::memory_order_relaxed);
+            g_timerTraceCount.store(0u, std::memory_order_relaxed);
+            g_insertAlarmFunction = runtime.lookupFunction(kInsertAlarmAddress);
+            g_timerHandlerFunction = runtime.lookupFunction(kTimerHandlerAddress);
+            g_unlinkAlarmFunction = runtime.lookupFunction(kUnlinkAlarmAddress);
+            replaced = g_insertAlarmFunction != nullptr &&
+                       g_timerHandlerFunction != nullptr &&
+                       g_unlinkAlarmFunction != nullptr &&
+                       runtime.replaceFunction(kInsertAlarmAddress,
+                                               traceInsertAlarm) &&
+                       runtime.replaceFunction(kUnlinkAlarmAddress,
+                                               traceUnlinkAlarm) &&
+                       runtime.replaceFunction(kTimerHandlerAddress,
+                                               traceTimerHandler) &&
+                       replaced;
+            std::cerr << "[DisneyPrincess:timer] tracing "
+                      << (replaced ? "enabled" : "failed") << std::endl;
         }
 
         if (!replaced)

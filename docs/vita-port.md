@@ -100,6 +100,11 @@ Do not delete generated functions merely to make the binary link.
 
 ### Runtime performance
 
+As of 2026-11-21 the PC build runs the title and menus at about one tenth of
+real time on a Ryzen 7 9800X3D, with nearly all time in GS rasterization and
+VU1 interpretation on one thread. The current CPU renderer and interpreter are
+therefore not viable on Vita.
+
 PS2Recomp currently calls out poor VU and GS performance and partial hardware
 coverage. The Vita adds a slower CPU budget and a different graphics stack.
 Before optimizing, profile:

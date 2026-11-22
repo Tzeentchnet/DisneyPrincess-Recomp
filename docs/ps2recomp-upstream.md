@@ -1,5 +1,9 @@
 # PS2Recomp upstream patch set
 
+This file records the inbound pinned patch stack. Potential outbound pull
+requests from the local work are tracked separately in
+[upstream.md](upstream.md).
+
 ## Pinned base
 
 The framework checkout starts from:
@@ -80,6 +84,65 @@ command-state behavior: the host data copy is synchronous, but guest-visible
 `sceCdRead`, `sceCdSync`, and `sceCdDiskReady` results model one pending
 command. It is matched by filename, entry point, and CRC32 and does not alter
 PS2Recomp's global CD stubs.
+
+## Local runtime correctness and profiling work
+
+The title path exposed several framework-level defects that are covered by
+focused regressions:
+
+- `SQRT.S` now reads the encoded `ft` operand rather than `fs`.
+- PS2 exponent-255 float values compare as finite values instead of host IEEE
+  infinities/NaNs, and translated MIN/MAX operations use the same ordering.
+- Keyboard and physical-controller active-low button masks are merged instead
+  of selecting only one input source.
+- The texture-page mirror is a 64-entry direct-mapped cache with invalidation
+  and multi-page visibility coverage.
+
+- VU (`PS2X_TRACE_VU_STORE_QWORD`, `PS2X_TRACE_VU_VF`, `PS2X_TRACE_VU_VI`)
+  and VIF1 (`PS2X_TRACE_VIF1_QWORD`) trace variables are read once per
+  process. They must now be set before launch.
+- VIF1 PATH2 now rejoins incomplete PACKED, REGLIST, IMAGE, and FLG=3 GIF
+  packets across `DIRECT` commands and DMA boundaries. Pending data is cleared
+  on memory and VIF1 reset, and focused split-packet regressions cover the
+  byte-exact continuation path.
+
+Both of the last two fixes are generic upstream candidates. See
+[upstream.md](upstream.md) for proposed PR boundaries and validation gates.
+
+`PS2X_PROFILE_GS=1` enables bounded five-second aggregate reports for CPU GS
+submission, CLUT, transfer, upload, clear, and presentation work. It is
+disabled by default and times whole backend calls rather than individual
+pixels. An earlier conclusion from it, that GS cost was irrelevant, came from
+a run without a disc image and is withdrawn; see
+[PC port status](pc-port-status.md#correction-there-was-no-five-second-guest-stall).
+
+## First-gameplay framework changes (2026-11-22)
+
+Generic fixes:
+
+- R5900/COP2: truncating `CVT.W.S`, saturating VFTOI, hardwired VF0, MAC and
+  status from macro FMAC operations, CMSAR0 for `VCALLMSR`, VU0 data memory
+  for COP2 load/store macros, VDIV/VSQRT/VRSQRT and VCLIP semantics.
+- MPEG: callbacks survive `sceMpegInit`, DATA stream callbacks, no parking of
+  pull-model players, end flag, no hard-coded foreign libmpeg globals.
+- IOP: vblank handlers, SPU2 RAM/DMA/voice cursors, idle fast path.
+- EE scheduler: constant-time cycle accounting and pacing rebase.
+- VIF: V4-5 widening, VIF0 compressed UNPACK.
+- VU1: predecoded interpreter with identical results.
+- Vulkan: eight frame contexts, submission at vblank and idle, non-blocking
+  FINISH.
+
+Opt-in: `PS2Memory::setAsyncVif1`, for games that kick one display-list chain
+per frame. Only this game's override enables it.
+
+The recompiler fixes require regenerating the game sources.
+
+## Reproducibility warning
+
+The fixes in this section exist only as uncommitted changes in the submodule
+working tree on top of `3f45c62`. The recorded submodule revision and
+`scripts\bootstrap-framework.ps1` do not reproduce them. The `SQRT.S`,
+MIN/MAX and COP2 fixes also require regenerating the game sources.
 
 ## Remaining upstream risk
 

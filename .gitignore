@@ -1,5 +1,8 @@
 .work/
 build/
+/out/
+/mc0/
+/mc1/
 generated/
 *.iso
 *.ISO

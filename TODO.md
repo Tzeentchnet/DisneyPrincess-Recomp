@@ -3,8 +3,14 @@
 ## Near-term goal
 
 Reach the first playable level from a cold launch of the validated retail
-image. The immediate objective is not another isolated trace or one more
-partially modeled API.
+image, at 30 rendered frames per second or better. The immediate objective is
+not another isolated trace or one more partially modeled API.
+
+**Resume here (2026-11-22):** the first-gameplay and 30 fps gates are met on
+the development machine (741 s in game, mean 30.00 fps). Next, in order:
+commit the framework work, implement audio output, verify save/load and
+physical input, then play onward through the first world. See
+[PC port status](docs/pc-port-status.md).
 
 “In-game” means all of the following:
 
@@ -42,48 +48,61 @@ delay the first controllable-gameplay milestone.
 ## Current baseline
 
 - The USA ISO is validated, privately extracted, analyzed, and recompiled.
-- The native Windows Release runner builds and launches.
-- IOP module loading, SIF command handling, resumable blocking RPC, CD command
-  state, VIF/PATH2 continuation, VIF DMA, VU1 execution, and XGKICK have
-  demonstrated working paths.
-- The SCREAM semaphore/RPC failure is fixed.
-- The legal-state machine completes.
-- The post-legal state was found to wait on an effect whose timer never
-  advanced because the EE COP0 Count remained static.
-- EE scheduler-backed COP0 Count advancement and its regression test are now
-  implemented.
-- The full framework suite passes **461/461** after that timing change.
-- The retail validation run for the COP0 Count fix was interrupted before its
-  result was captured. Resume from this point rather than repeating earlier
-  boot investigations.
+- Cold boot, movies, menus, the new-game flow and the first rooms work at
+  30 fps with native Vulkan presentation and threaded VU1.
+- SPU2 voice timing is modelled so drivers progress, but nothing is mixed:
+  there is no sound.
+- All suites pass: framework 475/475, IOP 4/4, GS cache 47/47, parallel-gs.
+- **All framework fixes since `3f45c62` are uncommitted in the submodule.**
 
 ## P0 — cold boot to an interactable title screen
 
-- [ ] **Validate the EE timing fix through the complete startup transition.**
+- [x] **Validate the EE timing fix through the complete startup transition.**
   Run the retail build with bounded CD, state, render, and error evidence.
   Confirm that the global frame delta becomes non-zero, the post-legal effect
   completes, and the owner advances out of state 2. Do not stop at confirming
   those counters: continue the same investigation until the next scene
-  produces new resource activity and a visible non-black frame.
+  produces new resource activity and a visible non-black frame. Confirmed with
+  an approximately `0.033334` frame delta, state progression `2 -> 3 -> 0`,
+  later resource activity, and a native-window title capture.
 
-- [ ] **Complete every path-critical runtime behavior needed for the title
+- [x] **Complete every path-critical runtime behavior needed for the title
   screen.** Follow the entire startup path across resource loading, archive
   access, EE/IOP synchronization, VIF/VU/GS work, movie playback, and scene
   activation. Implement and test all demonstrated blockers in this path as
   one title-screen milestone rather than creating separate tiny tracing
   tasks.
 
+- [x] **Profile the apparent low-framerate symptom.** Sampling the game thread
+  attributed 87.8% of samples to the C runtime, caused by `getenv()` in trace
+  hooks. After caching those lookups the cost is absent from the profile.
+
+- [x] **Resolve the reported guest-progress stall.** There was no such stall
+  on the correctly configured path. The 465-submission profile logged
+  `sceCdRead unresolved request` for LBN `0x10` because `DPRE_CD_IMAGE` was
+  not set. With the image set, submissions and pad reads continue.
+
+- [x] **Fix title-scene texture corruption.** VIF1 now carries incomplete
+  PACKED tags across `DIRECT` commands and DMA transfers.
+
+- [x] **Explain the black screen before the title.** The post-legal effect
+  explicitly polls four input objects and leaves result `+0x34` at zero until
+  an accepted button mask is pressed. It is an input wait, not a GS FINISH or
+  callback stall.
+
 - [ ] **Make the title/menu input path usable.** Verify both pad ports, active
   low button bits, analog ranges, reconnect behavior, and menu repeat timing
-  against the real menu. Remove `DPRE_AUTO_SKIP_BOOT` from acceptance runs;
-  automated input may remain an opt-in diagnostic only.
+  against the real menu. The active-low merge, foreground keyboard gating,
+  and finite diagnostic pulses are implemented and covered by 14 focused
+  tests. Physical short presses and distinct controller ports remain
+  unverified. Automated input may remain an opt-in diagnostic only.
 
-- [ ] **Prove the title-screen gate.** Capture a clean Release run showing:
+- [x] **Prove the title-screen gate.** Capture a clean Release run showing:
   a visible title/menu frame, continuing render activity, responsive input,
   no repeated runtime/SCREAM error, no missing-function termination, and no
   new unbounded wait.
 
-- [ ] **Update documentation for the title-screen gate.** At minimum update
+- [x] **Update documentation for the title-screen gate.** At minimum update
   [PC port status](docs/pc-port-status.md), [executable
   findings](docs/executable.md), [format findings](docs/formats.md), and the
   [PS2Recomp patch record](docs/ps2recomp-upstream.md). Record private logs
@@ -92,32 +111,104 @@ delay the first controllable-gameplay milestone.
 
 ### P0 acceptance gate
 
-- Three consecutive cold launches reach the same interactable title/menu.
+- Three consecutive cold launches reach the same interactable title/menu
+  (one full run recorded so far).
+- A normal-length physical key or controller press registers every time.
 - At least one launch uses no state-forcing or automatic-skip diagnostic.
 - All framework tests pass from the `PS2Recomp` working directory.
 - The PC Release build succeeds from the documented scripts.
 
+## P0 — reach 30 fps
+
+The game uses a 1/30 second frame delta, so it needs all 60 vblanks per second
+to show 30 frames. Both are met from the title through the first rooms on the
+development machine.
+
+- [x] **Restore the stable benchmark first.** The slow IRX startup was a
+  log-buffering artifact.
+
+- [x] **Add a true guest frame counter.** `vif1_chains` in the presentation
+  profile.
+
+- [x] **Move GS rasterization off the game thread.** parallel-gs now consumes
+  raw packets and presents through the shared native Vulkan device. Preserve
+  this ordering for CLUT loads, transfers, texture flushes, FINISH and
+  readbacks.
+
+- [ ] **Keep 30 fps on slower hosts and in heavier levels.** The VU1 thread
+  is 80-97% busy in the first room on a 9800X3D. The next large step is a VU1
+  recompiler; profile-guided optimization measured 5-18%.
+
+- [x] **Make VU1 much cheaper.** About 2.2x on captured in-game programs,
+  bit-identical to the previous interpreter. Validate any further change by
+  differential testing against it as well as the unit tests.
+
+- [x] **Reduce scheduler and IOP overhead.** Each guest dispatch walks every
+  EE thread to copy COP0 Count and runs the IOP scheduler. Native samples also
+  show repeated `std::_Rb_tree_increment` in IOP thread scans. Do not replace
+  the ordered thread table wholesale: that experiment changed wake ordering
+  and was reverted.
+
+- [x] **Cheapen presentation.** Each new vblank copies all 4 MiB of VRAM under
+  the raster lock.
+
+- [x] **Fix pacing after a slow period.** From code reading, missed host
+  deadlines are never rebased, so the guest would run unthrottled until it
+  catches up once the runtime is fast enough.
+
+### Performance acceptance gate
+
+- At least 30 guest frames per second, sustained, in the menu and in the
+  first level, in Release without diagnostics, measured by guest frame count.
+
+## P0 — input and launch defects found in the audit
+
+Items marked *(code)* come from reading the source and have not been
+reproduced.
+
+- [x] **Latch short presses** *(code)*. Keys are sampled only when the guest
+  polls, so a tap shorter than one slow guest frame is lost. This is the
+  likely cause of "buttons not registering" and is made worse by low speed.
+- [x] **Stop Escape closing the game** *(code)*. Escape is mapped to Circle
+  and is also raylib's default exit key.
+- [x] **Separate controller ports.** The backend ignores `port`, and traces
+  show every press arriving on both pads. This breaks two-player selection.
+- [x] **Give the keyboard an analog stick** *(code)*. WASD and the arrows only
+  set d-pad bits, so in-game movement may not work from a keyboard.
+- [x] **Hide the Runtime Debugger by default.** It opens over the game.
+- [x] **Make the executable self-contained.** The MinGW runtime is linked
+  statically.
+- [x] **Fail loudly without a disc image.** A direct launch has no default
+  image and continues into a broken boot, which produced the false stall
+  diagnosis.
+- [x] **Move saves out of the extracted disc.** The memory-card root resolves
+  to `.work\disc\mc0`, against this project's own rule.
+- [ ] **Repair the standalone framework build.** `ps2EntryRunner` fails to
+  link on MinGW (`CloseWindow` defined by both raylib and user32). The test
+  target builds when requested by name.
+
 ## P0 — title screen to first controllable gameplay
 
-- [ ] **Drive the normal new-game flow into the first level.** Exercise the
+- [x] **Drive the normal new-game flow into the first level.** Reached so
+  far: save-slot selection. Nothing after it has been exercised. Exercise the
   actual profile/name, language, difficulty, princess/world selection, and
   loading screens that appear on this retail build. Fix all path-critical
   resource, RPC, movie, input, and render failures encountered before the
   first controllable scene.
 
-- [ ] **Complete on-demand game-data loading used by that flow.** Verify
+- [x] **Complete on-demand game-data loading used by that flow.** Verify
   ISO9660 lookup, raw-LBN reads, VAPS containers, Papaya serialization, DDF
   references, model/texture uploads, and any streamed data actually requested
   on the route to gameplay. Extend inspection tools and format documentation
   when a newly observed structure must be understood; do not reverse engineer
   unrelated archives merely for completeness.
 
-- [ ] **Make the first scene controllable and stable.** Validate movement,
+- [x] **Make the first scene controllable and stable.** Validate movement,
   camera, interaction, pause/resume, scene rendering, loading transitions,
   and IOP progress for at least ten minutes. Fix deadlocks, runaway retries,
   corrupted state, and render stalls rather than bypassing them.
 
-- [ ] **Establish a repeatable first-gameplay smoke test.** Document a short
+- [x] **Establish a repeatable first-gameplay smoke test.** Document a short
   manual input sequence and, where reliable, an optional scripted input path
   that reaches the first playable scene from a cold launch. Capture objective
   counters and screenshots without committing copyrighted visual assets.
@@ -139,15 +230,22 @@ delay the first controllable-gameplay milestone.
 
 ## P1 — functional PC port
 
+- [ ] **Close graphics and VIF gaps found in the audit** *(code)*: REGLIST
+  tags split across `DIRECT`, a `DIRECT` payload split across DMA transfers,
+  compressed VIF0 UNPACK formats (silently skipped), the triangle top-left
+  fill rule, mipmap selection, and rasterization inheriting the VU's
+  round-toward-zero mode.
+
 - [ ] **Finish graphics correctness across representative gameplay.** Validate
   geometry, skinning, textures and CLUTs, alpha/depth tests, render targets,
   post-processing, particles, UI, and scene transitions. Prioritize visible
   gameplay defects and crashes over speculative GS completeness.
 
-- [ ] **Finish audio.** Validate SCREAM initialization, sound banks, streamed
-  BGM, voice VAGs, sound effects, volume changes, pause/resume, and clean
-  shutdown. Complete SIF DMA ID and callback timing if retail behavior proves
-  it is required.
+- [ ] **Finish audio.** Nothing is audible. The IOP runs the real LIBSD,
+  SCREAM and VAGSTRM modules against an SPU2 that models sample RAM, DMA and
+  voice cursors only. Add ADPCM decoding, ADSR, mixing, AutoDMA and host
+  output there, then validate banks, streamed BGM, voices, pause/resume and
+  shutdown. Investigate the logged `SCREAM Error: cause 15`.
 
 - [ ] **Finish movies.** Validate every startup and progression `.PSS` needed
   by a representative playthrough, including MPEG-2 video, private-stream
@@ -194,7 +292,8 @@ delay the first controllable-gameplay milestone.
 
 - [ ] **Prepare upstreamable fixes.** Keep regressions small, avoid
   Disney-specific data in generic tests, document relevant upstream PRs, and
-  record which local fixes should be proposed to PS2Recomp.
+  record which local fixes should be proposed to PS2Recomp. The outbound PR
+  plan is [docs/upstream.md](docs/upstream.md).
 
 ## P3 — broader PC compatibility
 
@@ -208,7 +307,7 @@ delay the first controllable-gameplay milestone.
   relocation, non-ASCII user paths, and release builds without diagnostic
   environment variables.
 
-- [ ] **Measure and optimize only after correctness.** Profile EE dispatch,
+- [ ] **Optimize beyond the 30 fps gate.** Profile EE dispatch,
   IOP scheduling, VU, VIF, GS, texture uploads, movies, audio, memory use, and
   loading. Preserve behavior with before/after tests and measurements.
 
@@ -268,7 +367,7 @@ Documentation is part of each task above, not a final cleanup pass.
 
 ## Deferred until after first gameplay
 
-- Broad performance tuning.
+- Performance work beyond what the 30 fps gate needs.
 - Runner-wide IPO experiments.
 - Exhaustive reverse engineering of assets not reached on the gameplay path.
 - Vita packaging or hardware optimization.
