@@ -1,0 +1,51 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "pc-release",
+      "displayName": "PC Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/pc-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PS2X_ENABLE_AGRESSIVE_LOGS": "OFF",
+        "PS2X_ENABLE_RUNTIME_LOGS": "ON",
+        "PS2X_SHOW_WINDOWS_CONSOLE": "ON"
+      }
+    },
+    {
+      "name": "pc-debug",
+      "displayName": "PC Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/pc-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PS2X_ENABLE_AGRESSIVE_LOGS": "OFF",
+        "PS2X_ENABLE_RUNTIME_LOGS": "ON",
+        "PS2X_SHOW_WINDOWS_CONSOLE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "pc-release",
+      "configurePreset": "pc-release",
+      "targets": [
+        "ps2EntryRunner"
+      ]
+    },
+    {
+      "name": "pc-debug",
+      "configurePreset": "pc-debug",
+      "targets": [
+        "ps2EntryRunner"
+      ]
+    }
+  ]
+}
+

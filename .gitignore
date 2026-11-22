@@ -1,0 +1,16 @@
+.work/
+build/
+generated/
+*.iso
+*.ISO
+*.elf
+*.ELF
+SLUS_*
+SLES_*
+SCUS_*
+SCES_*
+
+# The framework is a nested upstream checkout with its own build outputs.
+PS2Recomp/out/
+PS2Recomp/outvita/
+
