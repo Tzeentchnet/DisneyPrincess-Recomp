@@ -181,7 +181,9 @@ They contain MPEG-2 video PES packets and private-stream packets. `ffprobe`
 recognizes the representative `INTRO.PSS` video as 512x448 MPEG-2 at
 30000/1001 frames per second. The game executable contains Sony MPEG/IPU code
 and an error path referring to a VAG stream for movie audio; the private audio
-packet layout still needs explicit validation.
+packet layout still needs explicit validation. A retail movie run now produces
+non-silent SPU2 PCM through the real VAGSTRM module, which confirms the runtime
+path without identifying that packet structure.
 
 ## Remaining unknowns
 

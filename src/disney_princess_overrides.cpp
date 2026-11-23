@@ -30,6 +30,8 @@ namespace
     constexpr uint32_t kAllocatorLoopAddress = 0x001D2C18u;
     constexpr uint32_t kBootStateAddress = 0x001083E8u;
     constexpr uint32_t kPostLegalStateAddress = 0x001085C8u;
+    constexpr uint32_t kFrameTimingSyncAddress = 0x00325288u;
+    constexpr uint32_t kFrameTimingSyncReturnAddress = 0x00100304u;
     constexpr uint32_t kFrameServiceAddress = 0x0025FC40u;
     constexpr uint32_t kInsertAlarmAddress = 0x00318D98u;
     constexpr uint32_t kUnlinkAlarmAddress = 0x00318E20u;
@@ -70,6 +72,7 @@ namespace
     PS2Runtime::RecompiledFunction g_allocatorFunction = nullptr;
     PS2Runtime::RecompiledFunction g_bootStateFunction = nullptr;
     PS2Runtime::RecompiledFunction g_postLegalStateFunction = nullptr;
+    PS2Runtime::RecompiledFunction g_frameTimingSyncFunction = nullptr;
     PS2Runtime::RecompiledFunction g_frameServiceFunction = nullptr;
     PS2Runtime::RecompiledFunction g_insertAlarmFunction = nullptr;
     PS2Runtime::RecompiledFunction g_timerHandlerFunction = nullptr;
@@ -230,6 +233,27 @@ namespace
     {
         const char *value = std::getenv("DPRE_AUTO_SKIP_BOOT");
         return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    bool unlockedFrameRateEnabled()
+    {
+        const char *value = std::getenv("DPRE_60_FPS");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    void disneyFrameTimingSync(uint8_t *rdram,
+                               R5900Context *ctx,
+                               PS2Runtime *runtime)
+    {
+        const uint32_t returnAddress = GPR_U32(ctx, 31);
+        if (returnAddress == kFrameTimingSyncReturnAddress)
+        {
+            setReturnS32(ctx, 0);
+            ctx->pc = returnAddress;
+            return;
+        }
+
+        g_frameTimingSyncFunction(rdram, ctx, runtime);
     }
 
     void traceBootState(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1078,19 +1102,17 @@ namespace
 
         const bool delivered = runtime->handleIopSifCommand(
             rdram, ctx, commandId, packet.data(), packet.size());
-        if (!delivered)
+        if (!delivered && rpcTraceEnabled())
         {
-            std::cerr << "[DisneyPrincess] IOP rejected SIF command"
+            std::cerr << "[DisneyPrincess:RPC] SIF command had no registered IOP handler"
                       << " cid=0x" << std::hex << commandId
                       << " packetSize=0x" << packetSize
                       << " extraDestination=0x" << destination
                       << " extraSize=0x" << size
                       << std::dec << std::endl;
-            setReturnS32(ctx, 0);
-            return;
         }
 
-        if (rpcTraceEnabled())
+        if (delivered && rpcTraceEnabled())
         {
             std::cerr << "[DisneyPrincess:RPC] delivered SIF command"
                       << " cid=0x" << std::hex << commandId
@@ -1355,6 +1377,18 @@ namespace
             runtime.setEeSyscallOverride(rdram,
                                          kEndOfHeapSyscall,
                                          kEndOfHeapHandlerAddress);
+        }
+
+        if (unlockedFrameRateEnabled())
+        {
+            g_frameTimingSyncFunction =
+                runtime.lookupFunction(kFrameTimingSyncAddress);
+            replaced = g_frameTimingSyncFunction != nullptr &&
+                       runtime.replaceFunction(kFrameTimingSyncAddress,
+                                               disneyFrameTimingSync) &&
+                       replaced;
+            std::cerr << "[DisneyPrincess] 60 fps frame limiter bypass "
+                      << (replaced ? "enabled" : "failed") << std::endl;
         }
 
         if (allocatorTraceEnabled())

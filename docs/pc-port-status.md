@@ -14,17 +14,88 @@
 | Native runner compilation | Complete | Static MinGW runtime; FFmpeg DLLs alongside |
 | Process launch | Working | `run-pc.ps1` and direct launch; 9 IRX modules in 0.7 s |
 | Title and menus | Working | 30 fps |
-| Movies | Working, no sound | Logo and intro play; the intro runs to its end and continues |
+| Movies | Working with audio output | Logo and intro play; SPU2 telemetry is non-silent |
 | New-game flow | Working | Intro, name entry, character creator, cutscenes |
-| Gameplay | **First rooms reached** | Movement, a room transition, pause/resume |
-| Performance | **30 fps met where tested** | 741 s in game: mean 30.00, worst 5 s window 29.90 |
-| Audio output | **Not implemented** | SPU2 voice timing is modelled; nothing is mixed |
+| Gameplay | **Opening room reached; first doorway blocked** | Movement and pause/resume work; doorway loading remains live indefinitely |
+| Performance | **30 fps verified; 60 fps experimental** | 741 s at 30.00 fps; `DPRE_60_FPS=1` reaches about 60 chains/s in light/loading scenes |
+| Audio output | **Implemented, hitching unresolved** | ADPCM/ADSR/AutoDMA mix to a bounded 48 kHz host stream; recurring hitches and one queue drop observed |
 | Saving and loading | Not verified | Existing saves are detected; writing is untested |
 | Physical keyboard/controller | Not verified | Validation used `PS2X_INPUT_FILE` |
-| Beyond the opening rooms | Not tested | |
+| Beyond the opening room | **Blocked** | First doorway remains on `Loading. Please wait...` |
 
 "Complete" means the stated artifact was produced and structurally validated.
 It does not mean that the game is fully playable.
+
+## Checkpoint: 2026-11-22, first doorway loading blocker
+
+A bounded cold route entered the one-letter profile name `L`, completed all
+character-creation pages, let the opening cinematic finish, reached the first
+room, and held the left stick right in five-second segments. The second segment
+entered the doorway loading screen. After another 75 seconds the spinner and
+message were still rendering.
+
+This is a live guest wait, not a process deadlock. During the wait,
+`advanced_vblanks` and `vif1_chains` each continued at about 60 per second.
+The final captures and trace are under the ignored
+`.work/logs/gameplay-sif-trace` directory.
+
+`PS2X_TRACE_SIF_COMMANDS=1` narrowed the failure:
+
+1. The doorway stream request used command ID 0, packet size `0x1C`,
+   destination `0x13AC80`, size `0x108`, IOP handler `0x6A0D4`, callback
+   `0x26EB88`, and callback argument `0x407264`.
+2. That request reached the IOP handler. Its IOP-to-EE completion command
+   reported `delivered=1`; the earlier hypothesis that this particular
+   completion was rejected is false.
+3. More stream requests completed, then command ID 0 disappeared from the IOP
+   handler table. The next `0x138`-byte request to `0x138700` and `0xF0`-byte
+   request to `0x13AC80` both reported
+   `SIF command had no registered IOP handler`.
+
+The immediate follow-up is therefore the IOP SIF command-handler lifecycle,
+not VU rendering or the already-delivered `0x108` completion. Determine what
+removes handler 0, correct that lifecycle behavior, add a focused regression,
+and verify that the transition reaches its destination. The earlier
+`SCREAM Error: cause 15` occurs before the doorway sequence and is not yet
+established as its cause.
+
+The same route also confirms that `Start` pauses the opening cinematic rather
+than skipping it. Automation must leave input neutral and wait for the
+letterbox to disappear.
+
+Progressive field reconstruction now keeps consecutive gameplay captures
+vertically aligned; the previously reported even/odd-field jitter was not
+present in this route.
+
+## Checkpoint: 2026-11-22, first host audio
+
+The emulated SPU2 now advances from the IOP clock and produces interleaved
+48 kHz stereo PCM. It decodes PlayStation ADPCM blocks, interpolates pitched
+voices, applies ADSR and per-voice/core volumes, mixes AutoDMA's planar PCM,
+and preserves the NAX, ENDX and ENVX behavior used by the real sound drivers.
+The runtime feeds that PCM to a double-buffered raylib stream and bounds its
+queue to prevent unbounded latency.
+
+Focused regressions cover a non-repeating ADPCM voice, ENDX, stereo mixing,
+ADSR release and AutoDMA channel layout. All four IOP suites and the
+475-test framework suite pass.
+
+Two bounded retail runs provided path evidence:
+
+- a 180-second startup/menu/movie run produced continuous non-zero peaks up
+  to about 18,000, maintained frame progress and reported no queue drop,
+  runtime error or SCREAM error;
+- a longer scripted run reached the first playable room, produced non-zero
+  output on the route, and dropped to exact zero after the game was paused
+  while guest frame progress continued.
+
+`PS2X_TRACE_AUDIO=1` prints one aggregate mixed-frame/peak report per emulated
+second. It is opt-in and does not dump copyrighted audio.
+
+This proves sample generation, host delivery and pause muting, not subjective
+quality. Listening checks, the options-volume path, resume, and explicit
+classification of representative bank, BGM, voice and SFX playback remain
+open. Reverb, noise and other unexercised SPU2 features are not claimed.
 
 ## Checkpoint: 2026-11-22, first gameplay
 
@@ -83,21 +154,28 @@ without changing the framebuffer page.
 
 `PS2X_INPUT_FILE=<path>` replaces port-one input with one line,
 `<pressed mask in hex> [lx ly rx ry]`, which is re-read at each pad poll and
-needs no window focus.
+needs no window focus. Use `PS2X_INPUT_FILE_2=<neutral-path>` for an explicitly
+neutral second port; driving both ports duplicates menu actions.
 
 1. Cross at the first screen, Start at the logo and at PRESS START.
 2. Cross through New Game, One Player and a save slot.
 3. Wait about 130 seconds; the intro cannot be skipped the first time.
-4. Type a name, choose Enter, then Cross through the cutscene.
-5. Circle steps through the character creator (about 20 presses).
-6. After the wand cutscene the left stick moves the player.
+4. Enter a name (the automated route uses `L`) and choose Enter.
+5. From Dress style, 13 accepted Circle presses enter the opening cinematic.
+   Short file-driven presses may need a visual-state retry.
+6. Leave input neutral while the opening cinematic plays; Start toggles pause.
+7. After the letterbox disappears, the left stick moves the player. Two
+   five-second rightward segments reach the currently blocked doorway.
 
 ### Validation
 
-- Framework suite: 475/475, three consecutive runs.
-- ps2xIOP: all four suites. GS cache: 47/47. parallel-gs GPU test: passes.
+- Framework suite: 478/478.
+- ps2xIOP compatibility: 18/18; smoke, import and import-version suites pass.
+  GS cache: 47/47. parallel-gs GPU test: passes.
 - Four cold launches reached the first room at 30 fps, the last one on the
   final executable.
+- The audio-output build reached first gameplay with non-silent PCM and
+  muted to zero when paused.
 - One non-fatal `SCREAM Error: cause 15` was logged during the long run.
 
 ## Generated-code result

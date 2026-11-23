@@ -3,11 +3,16 @@
   "game": "Disney Princess: Enchanted Journey",
   "system": "PS2",
   "type": "recomp",
+  "project": "Disney Princess: Enchanted Journey Recompiled",
   "toolchain": "PS2Recomp",
-  "status": "exploring",
+  "status": "in-progress",
+  "targets": [
+    "Windows"
+  ],
+  "approach": "Static recompilation with PS2Recomp",
   "original": {
     "region": "USA",
     "serial": "SLUS-21660"
-  }
+  },
+  "notes": "Cold boots through the normal new-game flow to the first controllable room; the first doorway loading transition is the current blocker."
 }
-

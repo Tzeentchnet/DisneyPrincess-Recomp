@@ -125,7 +125,8 @@ Generic fixes:
   for COP2 load/store macros, VDIV/VSQRT/VRSQRT and VCLIP semantics.
 - MPEG: callbacks survive `sceMpegInit`, DATA stream callbacks, no parking of
   pull-model players, end flag, no hard-coded foreign libmpeg globals.
-- IOP: vblank handlers, SPU2 RAM/DMA/voice cursors, idle fast path.
+- IOP: vblank handlers, SPU2 RAM/DMA/voice cursors, ADPCM/ADSR mixing,
+  AutoDMA PCM delivery, idle fast path.
 - EE scheduler: constant-time cycle accounting and pacing rebase.
 - VIF: V4-5 widening, VIF0 compressed UNPACK.
 - VU1: predecoded interpreter with identical results.
@@ -139,10 +140,10 @@ The recompiler fixes require regenerating the game sources.
 
 ## Reproducibility warning
 
-The fixes in this section exist only as uncommitted changes in the submodule
-working tree on top of `3f45c62`. The recorded submodule revision and
-`scripts\bootstrap-framework.ps1` do not reproduce them. The `SQRT.S`,
-MIN/MAX and COP2 fixes also require regenerating the game sources.
+The first-gameplay fixes are recorded in framework commit `278d058`; audio,
+input, progressive presentation, VU1 and dispatcher follow-ups are recorded
+in `0794e9b`. The root repository pins `0794e9b`. The `SQRT.S`, MIN/MAX and
+COP2 fixes also require regenerating the game sources.
 
 ## Remaining upstream risk
 

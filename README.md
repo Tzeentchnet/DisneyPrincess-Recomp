@@ -16,8 +16,10 @@ working. The retail ELF currently produces 9,690 recompiled functions and 129
 stubs with no decoder failures or unhandled instructions. The PC build cold
 boots through the logo movie, title, menus, intro movie, name entry and
 character creator into the first playable room, where it holds 30 fps on a
-Ryzen 7 9800X3D and RTX 5070. Only that opening has been played, sound output
-is not implemented, and saving is untested; see
+Ryzen 7 9800X3D and RTX 5070. SPU2 ADPCM voices and streamed PCM now reach a
+48 kHz host output stream, although recurring audio hitches, listening
+quality, and audio options remain open. The first doorway currently remains
+on a live loading screen, and saving is untested; see
 [PC port status](docs/pc-port-status.md) and [TODO](TODO.md).
 The Vita target is an explicit follow-on target, not a verified port.
 

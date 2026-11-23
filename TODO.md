@@ -6,11 +6,14 @@ Reach the first playable level from a cold launch of the validated retail
 image, at 30 rendered frames per second or better. The immediate objective is
 not another isolated trace or one more partially modeled API.
 
-**Resume here (2026-11-22):** the first-gameplay and 30 fps gates are met on
-the development machine (741 s in game, mean 30.00 fps). Next, in order:
-commit the framework work, implement audio output, verify save/load and
-physical input, then play onward through the first world. See
-[PC port status](docs/pc-port-status.md).
+**Resume here (2026-11-22):** cold boot, profile creation, character creation,
+the opening cinematic, and the first controllable room are repeatable. Leaving
+that room is blocked by a live loading wait. The doorway's `0x108` SIFSTRM
+request completes and its IOP-to-EE command reports `delivered=1`; immediately
+afterward, two later stream submissions fail because command ID 0 no longer
+has an IOP handler. Next, identify and correct that handler-lifecycle loss,
+verify the destination room, then resume active-gameplay 60 fps and audio-hitch
+work. See [PC port status](docs/pc-port-status.md).
 
 “In-game” means all of the following:
 
@@ -50,10 +53,19 @@ delay the first controllable-gameplay milestone.
 - The USA ISO is validated, privately extracted, analyzed, and recompiled.
 - Cold boot, movies, menus, the new-game flow and the first rooms work at
   30 fps with native Vulkan presentation and threaded VU1.
-- SPU2 voice timing is modelled so drivers progress, but nothing is mixed:
-  there is no sound.
-- All suites pass: framework 475/475, IOP 4/4, GS cache 47/47, parallel-gs.
-- **All framework fixes since `3f45c62` are uncommitted in the submodule.**
+- `DPRE_60_FPS=1` removes the game's additional 25 ms limiter while retaining
+  normal VSync. Loading and light scenes sustain about 60 VIF1 chains/s, but
+  sustained 60 fps in active gameplay is not yet verified.
+- Progressive field reconstruction removes the observed even/odd vertical
+  jitter in consecutive gameplay captures.
+- SPU2 ADPCM decoding, ADSR, stereo voice mixing, AutoDMA PCM and bounded
+  48 kHz host streaming are implemented. Scripted retail runs produced
+  non-silent movie/menu/gameplay output and silence while paused, but recurring
+  audible hitches and one trace-light queue drop remain unresolved.
+- All suites pass: framework 478/478, IOP compatibility 18/18, IOP smoke,
+  import and import-version suites, GS cache 47/47, and parallel-gs.
+- Framework commits `278d058` and `0794e9b` contain the first-gameplay,
+  audio, input, rendering and dispatcher fixes; the root pins `0794e9b`.
 
 ## P0 — cold boot to an interactable title screen
 
@@ -139,6 +151,12 @@ development machine.
   is 80-97% busy in the first room on a 9800X3D. The next large step is a VU1
   recompiler; profile-guided optimization measured 5-18%.
 
+- [ ] **Validate and optimize the experimental 60 fps path.**
+  `DPRE_60_FPS=1` bypasses only the executable's extra 25 ms limiter. Use
+  `vif1_chains`, not host presents or `guest_flips`, to measure real guest
+  frames. Loading and lighter scenes can approach 60 chains/s; capture a
+  sustained active-gameplay profile after the doorway transition works.
+
 - [x] **Make VU1 much cheaper.** About 2.2x on captured in-game programs,
   bit-identical to the previous interpreter. Validate any further change by
   differential testing against it as well as the unit tests.
@@ -203,10 +221,22 @@ reproduced.
   when a newly observed structure must be understood; do not reverse engineer
   unrelated archives merely for completeness.
 
-- [x] **Make the first scene controllable and stable.** Validate movement,
+- [ ] **Make the first scene controllable and stable.** Validate movement,
   camera, interaction, pause/resume, scene rendering, loading transitions,
-  and IOP progress for at least ten minutes. Fix deadlocks, runaway retries,
-  corrupted state, and render stalls rather than bypassing them.
+  and IOP progress for at least ten minutes. Movement and pause/resume work,
+  and the opening room remained live for more than ten minutes, but the first
+  doorway remains on `Loading. Please wait...`.
+
+- [ ] **Fix the first doorway's SIFSTRM handler lifecycle.** A bounded,
+  single-port route reached the loading screen after two five-second rightward
+  movement segments and remained there for another 75 seconds while VSync and
+  VIF1 continued at about 60/s. The `cid=0`, `extraSize=0x108`,
+  `extraDestination=0x13AC80` request reached IOP handler `0x6A0D4`, and the
+  corresponding IOP-to-EE command reported `delivered=1`. Later submissions
+  for `0x138` bytes to `0x138700` and `0xF0` bytes to `0x13AC80` were rejected
+  with `SIF command had no registered IOP handler`. Trace why command ID 0 is
+  removed, correct the lifecycle semantics, add a focused regression, and
+  verify that callback `0x26EB88` advances into the destination room.
 
 - [x] **Establish a repeatable first-gameplay smoke test.** Document a short
   manual input sequence and, where reliable, an optional scripted input path
@@ -241,11 +271,15 @@ reproduced.
   post-processing, particles, UI, and scene transitions. Prioritize visible
   gameplay defects and crashes over speculative GS completeness.
 
-- [ ] **Finish audio.** Nothing is audible. The IOP runs the real LIBSD,
-  SCREAM and VAGSTRM modules against an SPU2 that models sample RAM, DMA and
-  voice cursors only. Add ADPCM decoding, ADSR, mixing, AutoDMA and host
-  output there, then validate banks, streamed BGM, voices, pause/resume and
-  shutdown. Investigate the logged `SCREAM Error: cause 15`.
+- [ ] **Finish audio.** The IOP now runs the real LIBSD, SCREAM and VAGSTRM
+  modules against cycle-driven ADPCM decoding, ADSR, stereo voice mixing,
+  AutoDMA PCM and a bounded 48 kHz host stream. Focused ADPCM/AutoDMA tests,
+  all IOP suites and the 478-test framework suite pass. Scripted retail runs
+  reached first gameplay with non-silent output and zero output while paused,
+  but audio and gameplay still hitch every one or two seconds and one
+  trace-light unlocked run dropped queued output. Validate by ear, distinguish
+  representative banks/BGM/voices/SFX, exercise options volume and resume,
+  then isolate the queue drop and the earlier `SCREAM Error: cause 15`.
 
 - [ ] **Finish movies.** Validate every startup and progression `.PSS` needed
   by a representative playthrough, including MPEG-2 video, private-stream
